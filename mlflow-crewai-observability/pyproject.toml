@@ -1,0 +1,24 @@
+[project]
+name = "mlflow-crewai-observability"
+version = "0.1.0"
+description = "CrewAI multi-agent financial crew with MLflow tracing & observability"
+readme = "README.md"
+requires-python = ">=3.10"
+license = "MIT"
+dependencies = [
+    "crewai>=1.0.0,<2.0.0",
+    "mlflow>=3.0.0,<4.0.0",
+    "python-dotenv>=1.0.0",
+]
+
+[project.scripts]
+financial-crew = "financial_crew:main"
+
+[tool.uv]
+package = false
+no-build-package = ["pydantic-core"]
+override-dependencies = [
+    "pydantic==2.12.0",
+    "pydantic-core==2.41.1",
+    "chromadb>=1.5.0",
+]
