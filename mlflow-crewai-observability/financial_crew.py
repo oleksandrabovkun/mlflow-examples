@@ -90,6 +90,59 @@ class FetchWorldBankInflationTool(BaseTool):
 # ---------------------------------------------------------------------------
 
 _crew_metrics: dict[str, object] = {}
+delegation_counts: dict[str, int] = {}
+
+
+# ---------------------------------------------------------------------------
+# State handoff helpers
+# ---------------------------------------------------------------------------
+
+def handoff_efficiency_score(output_text: str, next_input_text: str) -> float:
+    """Token overlap between agent output and the next agent's input.
+
+    Score of 1.0 means the next agent received everything the previous one produced.
+    Score close to 0.0 means most of the output was dropped before handoff.
+    """
+    output_tokens = set(output_text.lower().split())
+    input_tokens = set(next_input_text.lower().split())
+    if not output_tokens:
+        return 0.0
+    return len(output_tokens & input_tokens) / len(output_tokens)
+
+
+@mlflow.trace(name="state_handoff", span_type="CHAIN")
+def log_state_handoff(
+    from_agent: str, to_agent: str, output: str, next_input: str
+) -> None:
+    """Log a traced span capturing the handoff between two agents."""
+    span = mlflow.get_current_active_span()
+    if span:
+        span.set_attributes({
+            "handoff.from_agent": from_agent,
+            "handoff.to_agent": to_agent,
+            "handoff.output_chars": len(output),
+            "handoff.input_chars": len(next_input),
+            "handoff.efficiency_score": handoff_efficiency_score(output, next_input),
+        })
+
+
+def track_routing(step_output: object) -> None:
+    """step_callback — fires after every agent step.
+
+    Tracks how many steps each agent takes in a single run.
+    A count > 3 for one agent is a signal of a potential loop.
+    """
+    agent_name = getattr(step_output, "agent", None) or "unknown"
+    delegation_counts[agent_name] = delegation_counts.get(agent_name, 0) + 1
+
+    span = mlflow.get_current_active_span()
+    if span:
+        span.set_attributes({
+            f"routing.{agent_name}.step_count": delegation_counts[agent_name],
+            "routing.total_steps": sum(delegation_counts.values()),
+            # More than 3 steps for a single agent in one run is a loop signal
+            "routing.loop_detected": any(v > 3 for v in delegation_counts.values()),
+        })
 
 
 def _on_plan_complete(output: object) -> None:
@@ -102,12 +155,26 @@ def _on_stats_complete(output: object) -> None:
     text = crew_state.task_output_to_text(output)
     crew_state.set_state("macro_stats_snapshot", text)
     _crew_metrics["macro_data_specialist.output_chars"] = len(text)
+    charter = crew_state.get_state("engagement_charter") or ""
+    log_state_handoff(
+        from_agent="orchestration_lead",
+        to_agent="macro_data_specialist",
+        output=charter,
+        next_input=text,
+    )
 
 
 def _on_research_complete(output: object) -> None:
     text = crew_state.task_output_to_text(output)
     crew_state.set_state("research_brief", text)
     _crew_metrics["research_analyst.output_chars"] = len(text)
+    stats = crew_state.get_state("macro_stats_snapshot") or ""
+    log_state_handoff(
+        from_agent="macro_data_specialist",
+        to_agent="research_analyst",
+        output=stats,
+        next_input=text,
+    )
 
 
 def _on_synthesis_complete(output: object) -> None:
@@ -117,6 +184,12 @@ def _on_synthesis_complete(output: object) -> None:
     research = crew_state.get_state("research_brief") or ""
     result = validate_report_numbers_against_sources(synthesis, research)
     _crew_metrics["validation.result_chars"] = len(result)
+    log_state_handoff(
+        from_agent="research_analyst",
+        to_agent="synthesist",
+        output=research,
+        next_input=synthesis,
+    )
 
 # ---------------------------------------------------------------------------
 # Crew assembly
@@ -289,6 +362,7 @@ def build_crew(llm: BaseLLM) -> Crew:
     return Crew(
         agents=[orchestrator, macro_data, researcher, synthesist],
         tasks=[plan_task, stats_task, research_task, synthesis_task],
+        step_callback=track_routing,
         verbose=True,
     )
 
@@ -300,6 +374,7 @@ def build_crew(llm: BaseLLM) -> Crew:
 def run_crew_with_metrics(crew: Crew) -> CrewOutput:
     """Run ``crew.kickoff()`` inside a traced span that collects summary metrics."""
     _crew_metrics.clear()
+    delegation_counts.clear()  # reset between runs to avoid false loop detection
     t0 = time.perf_counter()
 
     result = crew.kickoff()

@@ -6,7 +6,7 @@ readme = "README.md"
 requires-python = ">=3.10"
 license = "MIT"
 dependencies = [
-    "crewai>=1.0.0,<2.0.0",
+    "crewai>=1.0.0,<1.10.0",
     "mlflow>=3.0.0,<4.0.0",
     "python-dotenv>=1.0.0",
 ]
@@ -15,7 +15,7 @@ dependencies = [
 financial-crew = "financial_crew:main"
 
 [tool.uv]
-package = false
+package = true
 no-build-package = ["pydantic-core"]
 override-dependencies = [
     "pydantic==2.12.0",
