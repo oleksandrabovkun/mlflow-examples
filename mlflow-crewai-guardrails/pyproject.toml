@@ -1,0 +1,27 @@
+[project]
+name = "mlflow-crewai-guardrails"
+version = "0.1.0"
+description = "CrewAI multi-agent financial crew with MLflow tracing & AI governance guardrails"
+readme = "README.md"
+requires-python = ">=3.10"
+license = "MIT"
+dependencies = [
+    "crewai>=1.0.0,<1.10.0",
+    "mlflow>=3.0.0,<4.0.0",
+    "python-dotenv>=1.0.0",
+]
+
+[project.scripts]
+financial-crew = "financial_crew:main"
+
+[tool.setuptools]
+py-modules = []
+
+[tool.uv]
+package = true
+no-build-package = ["pydantic-core"]
+override-dependencies = [
+    "pydantic==2.12.0",
+    "pydantic-core==2.41.1",
+    "chromadb>=1.5.0",
+]
